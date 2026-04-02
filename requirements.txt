@@ -1,0 +1,7 @@
+fastapi==0.109.0
+uvicorn==0.27.0
+python-multipart==0.0.6
+deepface==0.0.93
+tf-keras
+numpy
+Pillow
