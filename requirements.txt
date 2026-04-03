@@ -7,3 +7,4 @@ deepface==0.0.93
 opencv-python-headless==4.11.0.86
 numpy==1.26.4
 Pillow==10.2.0
+pandas==2.2.3

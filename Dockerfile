@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
-    && pip uninstall -y opencv-python \
+    && (pip uninstall -y opencv-python || true) \
     && pip install --no-cache-dir --force-reinstall opencv-python-headless==4.11.0.86
 COPY . .
 EXPOSE 8001
