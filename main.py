@@ -1,10 +1,11 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from deepface import DeepFace
+import cv2
 import numpy as np
 import tempfile
 import os
 import logging
+import urllib.request
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,61 +19,73 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+WEIGHTS_DIR = "/root/.deepface/weights"
+DETECTOR_PATH = os.path.join(WEIGHTS_DIR, "face_detection_yunet_2023mar.onnx")
+RECOGNIZER_PATH = os.path.join(WEIGHTS_DIR, "face_recognition_sface_2021dec.onnx")
+
+DETECTOR_URL = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
+RECOGNIZER_URL = "https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx"
+
+face_detector = None
+face_recognizer = None
+
+
+def download_if_missing(url, path):
+    if not os.path.exists(path):
+        logger.info(f"Downloading {os.path.basename(path)}...")
+        urllib.request.urlretrieve(url, path)
+        logger.info(f"Done: {os.path.basename(path)}")
+
 
 @app.on_event("startup")
-async def load_model():
-    """Pre-load the SFace model on startup so first request is fast."""
-    logger.info("Pre-loading SFace model...")
-    try:
-        DeepFace.represent(
-            img_path=np.zeros((224, 224, 3), dtype=np.uint8),
-            model_name="SFace",
-            detector_backend="skip",
-            enforce_detection=False,
-        )
-        logger.info("Model loaded successfully!")
-    except Exception as e:
-        logger.warning(f"Model pre-load note: {e}")
+async def load_models():
+    global face_detector, face_recognizer
+    os.makedirs(WEIGHTS_DIR, exist_ok=True)
+    download_if_missing(DETECTOR_URL, DETECTOR_PATH)
+    download_if_missing(RECOGNIZER_URL, RECOGNIZER_PATH)
+    face_detector = cv2.FaceDetectorYN.create(DETECTOR_PATH, "", (320, 320))
+    face_recognizer = cv2.FaceRecognizerSF.create(RECOGNIZER_PATH, "")
+    logger.info("Models loaded successfully!")
 
 
 @app.post("/extract-embedding")
 async def extract_embedding(file: UploadFile = File(...)):
-    """
-    Accept an image, detect all faces, return 128-dim embeddings (SFace).
-    Using SFace + opencv to stay within Render free tier 512 MB RAM limit.
-    """
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
     suffix = os.path.splitext(file.filename or "img.jpg")[1] or ".jpg"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        content = await file.read()
-        tmp.write(content)
+        tmp.write(await file.read())
         tmp_path = tmp.name
 
     try:
-        results = DeepFace.represent(
-            img_path=tmp_path,
-            model_name="SFace",          # 128-dim, ~400 MB RAM — fits free tier
-            detector_backend="opencv",   # lighter than retinaface
-            enforce_detection=False,
-            align=True,
-        )
+        img = cv2.imread(tmp_path)
+        if img is None:
+            return {"faces": [], "face_count": 0, "error": "Could not read image"}
+
+        h, w = img.shape[:2]
+        face_detector.setInputSize((w, h))
+        _, detections = face_detector.detect(img)
 
         faces = []
-        for r in results:
-            confidence = r.get("face_confidence", 0)
-            if confidence > 0.5:
+        if detections is not None:
+            for det in detections:
+                confidence = float(det[-1])
+                if confidence < 0.5:
+                    continue
+                aligned = face_recognizer.alignCrop(img, det)
+                embedding = face_recognizer.feature(aligned).flatten().tolist()
+                x, y, fw, fh = int(det[0]), int(det[1]), int(det[2]), int(det[3])
                 faces.append({
-                    "embedding": r["embedding"],
-                    "facial_area": r["facial_area"],
-                    "confidence": float(confidence),
+                    "embedding": embedding,
+                    "facial_area": {"x": x, "y": y, "w": fw, "h": fh},
+                    "confidence": confidence,
                 })
 
         return {"faces": faces, "face_count": len(faces)}
 
     except Exception as e:
-        logger.error(f"Error: {str(e)}")
+        logger.error(f"Error: {e}")
         return {"faces": [], "face_count": 0, "error": str(e)}
 
     finally:
@@ -82,4 +95,4 @@ async def extract_embedding(file: UploadFile = File(...)):
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "model": "SFace", "detector": "opencv"}
+    return {"status": "healthy", "model": "SFace", "detector": "yunet"}
