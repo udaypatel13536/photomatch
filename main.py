@@ -60,7 +60,14 @@ async def extract_embedding(file: UploadFile = File(...)):
         if img is None:
             return {"faces": [], "face_count": 0, "error": "Could not read image"}
 
+        # Resize large images to reduce memory usage during inference
+        MAX_DIM = 1920
         h, w = img.shape[:2]
+        if max(h, w) > MAX_DIM:
+            scale = MAX_DIM / max(h, w)
+            img = cv2.resize(img, (int(w * scale), int(h * scale)))
+            h, w = img.shape[:2]
+
         face_detector.setInputSize((w, h))
         _, detections = face_detector.detect(img)
 
