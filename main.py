@@ -19,33 +19,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-WEIGHTS_DIR = "/root/.deepface/weights"
+WEIGHTS_DIR = "/app/weights"
 DETECTOR_PATH = os.path.join(WEIGHTS_DIR, "face_detection_yunet_2023mar.onnx")
 RECOGNIZER_PATH = os.path.join(WEIGHTS_DIR, "face_recognition_sface_2021dec.onnx")
-
-DETECTOR_URL = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
-RECOGNIZER_URL = "https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx"
 
 face_detector = None
 face_recognizer = None
 
 
-def download_if_missing(url, path):
-    if not os.path.exists(path):
-        logger.info(f"Downloading {os.path.basename(path)}...")
-        urllib.request.urlretrieve(url, path)
-        logger.info(f"Done: {os.path.basename(path)}")
-
-
 @app.on_event("startup")
 async def load_models():
     global face_detector, face_recognizer
-    os.makedirs(WEIGHTS_DIR, exist_ok=True)
-    download_if_missing(DETECTOR_URL, DETECTOR_PATH)
-    download_if_missing(RECOGNIZER_URL, RECOGNIZER_PATH)
     face_detector = cv2.FaceDetectorYN.create(DETECTOR_PATH, "", (320, 320))
     face_recognizer = cv2.FaceRecognizerSF.create(RECOGNIZER_PATH, "")
     logger.info("Models loaded successfully!")
+
+
+@app.get("/")
+async def root():
+    return {"status": "ok"}
+
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy", "model": "SFace", "detector": "yunet"}
 
 
 @app.post("/extract-embedding")
@@ -91,8 +88,3 @@ async def extract_embedding(file: UploadFile = File(...)):
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
-
-
-@app.get("/health")
-async def health():
-    return {"status": "healthy", "model": "SFace", "detector": "yunet"}
