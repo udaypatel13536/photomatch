@@ -5,8 +5,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
-    && pip uninstall -y opencv-python || true \
-    && pip install --no-cache-dir opencv-python-headless==4.9.0.80
+    && pip uninstall -y opencv-python \
+    && pip install --no-cache-dir --force-reinstall opencv-python-headless==4.11.0.86
 COPY . .
 EXPOSE 8001
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001"]
